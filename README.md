@@ -10,22 +10,17 @@ False positives most often happen at the beginning and end of files, where compl
 -------------------
 
 Limitations:
-Not guaranteed to find every possible digital error in an audio file.
-Only works on mono files
-Only works on uncompressed files
-Only works on 16 or 24 bit audio
-Cannot find dropouts shorter than a few samples
+* Not guaranteed to find every possible digital error in an audio file.
+* Only works on uncompressed PCM files
+* Cannot find dropouts shorter than a few samples
 
 
 -------------------
 
 TODO (soon):
-Support stereo 
-Refine algorithm with sample data.  New patterns for finding dropouts may emerge.
+* Refine algorithm with sample data.  New patterns for finding dropouts may emerge.
 
 TODO (later):
-Support an arbitrary # of channels
-Support an arbitrary bit rate
-Add GUI
-Support compressed file formats?
-Error detection/identification using machine learning? (would require huge set of example errors)
+* Add GUI
+* Support compressed file formats?
+* Error detection/identification using machine learning? (would require huge set of example errors)
