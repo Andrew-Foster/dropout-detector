@@ -15,7 +15,7 @@ import java.nio.ByteOrder;
 * TODO: Decrease the number of false positives.
 */
 public class DropoutDetector {
-
+  
   // Main loads the requested file into a stream and sends it
   // to the stream checker.
   public static void main(String[] args)  {
@@ -50,60 +50,64 @@ public class DropoutDetector {
 
   // Takes an audio input stream and prints
   // locations in the stream where suspected dropouts are.
-  private static void checkStreamForDropouts(AudioInputStream ais) throws java.io.IOException {
+  private static void checkStreamForDropouts(AudioInputStream ais) 
+                                          throws java.io.IOException {
     int numChannels = ais.getFormat().getChannels();
+    ArrayList<Dropout> errors = new ArrayList<Dropout>();
+    // The number of bytes per read equals the stream's frame size
+    byte[] readBytes = new byte[ais.getFormat().getFrameSize()];
     
-    // errorPositions will hold the positions in the file (which sample)
-    // where an error was detected.
-    ArrayList<Long> errorPositions = new ArrayList<Long>();
+    // //// Code to test the retrieval of the first sample ////
+    // ais.read(readBytes);
+    // int[] samples = bytesToInts(readBytes, numChannels);
+    // System.out.println("First Samples:");
+    // System.out.println("" + samples.length + " samples found");
+    // for (int i = 0; i < samples.length; i++) {
+    //   System.out.println("-- " + i + ". " + samples[i]);
+    // }
 
-    if (ais.getFormat().getSampleSizeInBits() == 16) {
-      //Run code for 16 bit audio
-      byte[] readBytes = new byte[2]; // read 2 bytes (1 frame) at a time
-      // for(int i = 0; i < 10; i++) {
-      //   ais.read(readBytes); 
-      //   int blah = bytesToInt16Bit(readBytes);
-      //   System.out.println(Integer.toString(i+1) + ". Sample as Int: " + blah);
-      // }
+    int[] currentSamples;
+    int[] numIdentical = new int[numChannels];   // # of consecutive samples with the same value
+    long count = 1;               // The sample's location in the file
 
-      ais.read(readBytes);
-      int previousSample = bytesToInt16Bit(readBytes);
-      int currentSample;
-      int numIdentical = 0;   // # of consecutive samples with the same value
-      long count = 1;          // The sample we're looking at
-      int diffThreshold = (int)Math.pow(2, 16) / 2;
-      System.out.println("Diff threshold: " + diffThreshold);
-      while (ais.read(readBytes) != -1) {
-        count++;
-        currentSample = bytesToInt16Bit(readBytes);
-        
-        if (previousSample == currentSample) {
-          numIdentical++;
+    ais.read(readBytes);
+    int[] previousSamples = bytesToInts(readBytes, numChannels);
+    while (ais.read(readBytes) != -1) {
+      count++;
+      currentSamples = bytesToInts(readBytes, numChannels);
+      
+      // check sample values of each channel against their previous sample value
+      for(int i = 0; i < numChannels; i++) {
+        if (previousSamples[i] == currentSamples[i]) {
+          numIdentical[i] = numIdentical[i] + 1;
         } else {
-          if (numIdentical > 4) {
-            errorPositions.add(count);
+          if (numIdentical[i] > 4) {
+            errors.add(new Dropout(count, i, numIdentical[i]));
             // System.out.println("This many identical: " + numIdentical + " at " + count/48000);
           } 
-          numIdentical = 0;
+          numIdentical[i] = 0;
         }
-        previousSample = currentSample;
       }
+      previousSamples = currentSamples;
+    }
 
+    if (errors.size() == 0) {
+      System.out.println("No Dropouts Detected.");
+    } else {
+      double region = -2;
+      for (Dropout dOut : errors) {
+        double position = (double)dOut.position / ais.getFormat().getSampleRate();
+        if ((position - region) > 1) { // at least 1 second from previous dropout
+          System.out.println("Dropout at " + position + "seconds:");
+          System.out.println("-- Channel " + dOut.channel);
+          System.out.println("-- " + dOut.numConsecutive + " samples");
+          region = position;
+        }
+        
 
-      // System.out.println("Buffer as int: " + (int)buf.getInt(0));
-
-    } else if (ais.getFormat().getSampleSizeInBits() == 24) {
-      // Code for 24 bit audio
-      byte[] readBytes = new byte[3]; // read 3 bytes (1 frame) at a time
-      for(int i = 0; i < 10; i++) {
-        ais.read(readBytes);
-        int blah = bytesToInt24Bit(readBytes);
-        System.out.println(Integer.toString(i+1) + ". Sample as Int: " + blah);
       }
     }
-  
   }
-
 
   // Ensures the given stream is in a format this program can work with
   // Takes in an AudioInputStream.  Returns true if the stream is any combination of
@@ -144,38 +148,72 @@ public class DropoutDetector {
     System.exit(1);
   }
 
-  // Takes a byte array of 2 bytes, interprets them as a signed short,
-  // and returns that value as an int.
-  // Assumes little-endian ordering
-  // Invariant: byte array input must be of length 2
-  private static int bytesToInt16Bit(byte[] bytes) {
-    assert (bytes.length == 2);
-    // Set up ByteBuffer
-    ByteBuffer buf = ByteBuffer.allocate(2);
-    buf.order(ByteOrder.LITTLE_ENDIAN);
+  /*
+  * Takes an array of bytes and a number of channels.
+  * The bytes represent a single PCM audio frame containing sample values for
+  * all channels as two's complement signed integers of varying numbers of bytes, 
+  * arranged sequentially by channel
+  * 
+  * Returns an array of ints where each int represents
+  * the value of a single sample for the channel at the same index.
+  */
+  private static int[] bytesToInts(byte[] bytes, int numChannels) {
+    int sampleSize = bytes.length / numChannels; // length (in bytes) of each sample
+    int[] result = new int[numChannels];
+    int padBytes = 4 - sampleSize;               // pad bytes needed to bring sampleSize to 4 bytes
+    assert (bytes.length > 0);                   // Bytes must contain at least 1 byte
+    assert (bytes.length % numChannels == 0);    // # of channels must divide evenly into # of bytes
+    assert (bytes.length >= numChannels);        // Must be at least as many bytes as channels
+    assert (sampleSize <= 4);                    // Number must fit in an int (4 bytes)
 
-    buf.put(bytes);
-    return (int)buf.getShort(0);
+    // For each channel
+    for (int i = 0; i < numChannels; i++) {
+      // Set up buffer
+      ByteBuffer buf = ByteBuffer.allocate(4);
+      buf.order(ByteOrder.LITTLE_ENDIAN);
+      
+      // Pad buffer
+      for (int j = 0; j < padBytes; j++) {
+        // Pad beginning of buffer (least significant digits).
+        // The point of this is to ensure that even if the sampleSize is only
+        // 1, 2, or 3 bytes, the most significant bit of that sample
+        // will still be the most significant bit when it is interpreted
+        // as a two's complement 32-bit integer.
+        // Otherwise, the value would be interpreted incorrectly.
+        // Later, we'll shift right to undo the padding step.
+        buf.put((byte)0x00);
+      }
+
+      // Add data to Buffer
+      for (int j = 0; j < sampleSize; j++) {
+        buf.put(bytes[(i*sampleSize) + j]); // Offset by the current channel
+      }
+
+      // Get the int representation
+      result[i] = buf.getInt(0);
+      // System.out.println("channel " + i + ", before shift: " + result[i]);
+      
+      // Shift back to undo padding step
+      result[i] = result[i] >> (padBytes * 4);
+      // System.out.println("channel " + i + ", after shift: " + result[i]);
+    }
+    return result;
   }
+}
 
-  // Takes a byte array of 3 bytes, pads with a 0x00 byte,
-  // and returns those bytes interpreted as an int.
-  // Assumes little-endian ordering
-  // Invariant: byte array input must be of length 3
-  private static int bytesToInt24Bit(byte[] bytes) {
-    assert (bytes.length == 3);
-    // Set up ByteBuffer
-    ByteBuffer buf = ByteBuffer.allocate(4);
-    buf.order(ByteOrder.LITTLE_ENDIAN);
 
-    // byte[] testBytes = {0x7F, 0x7F, 0x7F};
-    buf.put(bytes);
-    // Pad with zero byte.  Because the byte order is little-endian
-    // the zero will not affect the overall value when converted to int.    
-    buf.put((byte)0x00);
-    int result = buf.getInt(0);
-    // Adjust for 2's complement
-    return result > 8388607 ? result - 16777216 : result;
+// The Dropout class represents an instance of an audio dropout error.
+// position: which sample in the file it occurred.
+// channel: the channel on which it occurred (for stereo: 0 - left, 1 - right)
+// numConsecutive: how many consecutive identical samples are in this dropout
+class Dropout {
+  long position;
+  int channel;
+  int numConsecutive;
+
+  public Dropout(long position, int channel, int numConsecutive) {
+    this.position = position;
+    this.channel = channel;
+    this.numConsecutive = numConsecutive;
   }
-
 }
