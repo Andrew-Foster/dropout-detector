@@ -11,13 +11,10 @@ import java.nio.ByteOrder;
 *
 * Example of use: java DropoutDetector myfile.wav
 *
-* TODO: Support stereo, (multiple filetypes - might already do this), tailor to sample rate.
-* TODO: Decrease the number of false positives.
 */
 public class DropoutDetector {
   
-  // Main loads the requested file into a stream and sends it
-  // to the stream checker.
+  // Loads the requested file into a stream and sends it to the stream checker.
   public static void main(String[] args)  {
     File soundFile;
     AudioInputStream ais;
@@ -36,9 +33,10 @@ public class DropoutDetector {
     try {
       ais = AudioSystem.getAudioInputStream(soundFile);
       if (checkStreamFormat(ais)) {
-        System.out.println(ais.getFormat().toString());
+        // System.out.println(ais.getFormat().toString()); // Print file's format
+        System.out.println("Scanning...");
         checkStreamForDropouts(ais);
-      }        
+      }   
       ais.close();
 
     } catch (java.io.IOException e) {
@@ -48,28 +46,22 @@ public class DropoutDetector {
     }
   }
 
-  // Takes an audio input stream and prints
-  // locations in the stream where suspected dropouts are.
+  /*
+  * Takes an audio input stream and prints
+  * locations in the stream where suspected dropouts are.
+  */
   private static void checkStreamForDropouts(AudioInputStream ais) 
                                           throws java.io.IOException {
     int numChannels = ais.getFormat().getChannels();
     ArrayList<Dropout> errors = new ArrayList<Dropout>();
     // The number of bytes per read equals the stream's frame size
     byte[] readBytes = new byte[ais.getFormat().getFrameSize()];
-    
-    // //// Code to test the retrieval of the first sample ////
-    // ais.read(readBytes);
-    // int[] samples = bytesToInts(readBytes, numChannels);
-    // System.out.println("First Samples:");
-    // System.out.println("" + samples.length + " samples found");
-    // for (int i = 0; i < samples.length; i++) {
-    //   System.out.println("-- " + i + ". " + samples[i]);
-    // }
 
     int[] currentSamples;
-    int[] numIdentical = new int[numChannels];   // # of consecutive samples with the same value
-    long count = 1;               // The sample's location in the file
+    int[] numIdentical = new int[numChannels]; // # of consecutive samples with the same value
+    long count = 1;                            // The sample's location in the file
 
+    // Read in the first frame
     ais.read(readBytes);
     int[] previousSamples = bytesToInts(readBytes, numChannels);
     while (ais.read(readBytes) != -1) {
@@ -83,7 +75,6 @@ public class DropoutDetector {
         } else {
           if (numIdentical[i] > 4) {
             errors.add(new Dropout(count, i, numIdentical[i]));
-            // System.out.println("This many identical: " + numIdentical + " at " + count/48000);
           } 
           numIdentical[i] = 0;
         }
@@ -109,10 +100,12 @@ public class DropoutDetector {
     }
   }
 
-  // Ensures the given stream is in a format this program can work with
-  // Takes in an AudioInputStream.  Returns true if the stream is any combination of
-  // 16-bit, 24-bit, 44.1kHz, 48kHz, mono, or stero
-  // Else, prints a summary of problems to console and returns false
+  /*
+  * Ensures the given stream is in a format this program can work with
+  * Takes in an AudioInputStream.  Returns true if the stream is any combination of
+  * 16-bit, 24-bit, 44.1kHz, 48kHz, mono, or stero
+  * Else, prints a summary of problems to console and returns false
+  */
   private static boolean checkStreamFormat(AudioInputStream ais) {
     ArrayList<String> problems = new ArrayList<String>(2);
     AudioFormat af = ais.getFormat();
@@ -154,8 +147,10 @@ public class DropoutDetector {
   * all channels as two's complement signed integers of varying numbers of bytes, 
   * arranged sequentially by channel
   * 
-  * Returns an array of ints where each int represents
-  * the value of a single sample for the channel at the same index.
+  * Returns an array of ints where each int represents the value of a single sample 
+  * for a channel.  The index of the int corresponds to the channel number.
+  * e.g. [120, -502] represents the values of two samples from a stereo file: 
+  *       120 on channel 0, -502 on channel 1
   */
   private static int[] bytesToInts(byte[] bytes, int numChannels) {
     int sampleSize = bytes.length / numChannels; // length (in bytes) of each sample
@@ -172,15 +167,15 @@ public class DropoutDetector {
       ByteBuffer buf = ByteBuffer.allocate(4);
       buf.order(ByteOrder.LITTLE_ENDIAN);
       
-      // Pad buffer
+      // Pad buffer to fill 32 bits
       for (int j = 0; j < padBytes; j++) {
-        // Pad beginning of buffer (least significant digits).
-        // The point of this is to ensure that even if the sampleSize is only
-        // 1, 2, or 3 bytes, the most significant bit of that sample
-        // will still be the most significant bit when it is interpreted
-        // as a two's complement 32-bit integer.
-        // Otherwise, the value would be interpreted incorrectly.
-        // Later, we'll shift right to undo the padding step.
+        /* Pad beginning of buffer (least significant digits) with 0x00 bytes.
+        * This ensures that even if the sampleSize is only
+        * 1, 2, or 3 bytes, the most significant bit of that sample
+        * will still be the most significant bit when it is interpreted
+        * as a two's complement 32-bit integer.
+        * Otherwise, the value would be interpreted incorrectly.
+        * Later, we'll shift right to undo the padding step. */
         buf.put((byte)0x00);
       }
 
@@ -189,27 +184,21 @@ public class DropoutDetector {
         buf.put(bytes[(i*sampleSize) + j]); // Offset by the current channel
       }
 
-      // Get the int representation
+      // Get the int representation (signed 32-bit)
       result[i] = buf.getInt(0);
-      // System.out.println("channel " + i + ", before shift: " + result[i]);
       
       // Shift back to undo padding step
       result[i] = result[i] >> (padBytes * 4);
-      // System.out.println("channel " + i + ", after shift: " + result[i]);
     }
     return result;
   }
 }
 
-
 // The Dropout class represents an instance of an audio dropout error.
-// position: which sample in the file it occurred.
-// channel: the channel on which it occurred (for stereo: 0 - left, 1 - right)
-// numConsecutive: how many consecutive identical samples are in this dropout
 class Dropout {
-  long position;
-  int channel;
-  int numConsecutive;
+  long position;        // The sample at which the dropout occurred.
+  int channel;          // The # of the channel on which the dropout occurred
+  int numConsecutive;   // The # of consecutive identical samples in the dropout
 
   public Dropout(long position, int channel, int numConsecutive) {
     this.position = position;
